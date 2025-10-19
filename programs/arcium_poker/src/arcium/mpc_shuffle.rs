@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program::invoke;
 use crate::shared::constants::DECK_SIZE;
 use crate::shared::PokerError;
-use super::integration::{MxeInstructionData, EncryptedData, invoke_mxe_computation};
+use super::integration::{MxeInstructionData, EncryptedData};
 
 /// Result from Arcium MPC shuffle operation
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -17,6 +18,33 @@ pub struct ShuffleResult {
     
     /// Proof that shuffle was done correctly (optional)
     pub shuffle_proof: Option<Vec<u8>>,
+}
+
+/// Parameters for invoking MXE shuffle
+pub struct MxeShuffleParams<'info> {
+    /// MXE program account
+    pub mxe_program: Option<AccountInfo<'info>>,
+    
+    /// Computation definition account
+    pub comp_def: Option<AccountInfo<'info>>,
+    
+    /// Mempool account for queueing computation
+    pub mempool: Option<AccountInfo<'info>>,
+    
+    /// Cluster account
+    pub cluster: Option<AccountInfo<'info>>,
+    
+    /// Player entropy (encrypted)
+    pub encrypted_entropy: Vec<[u8; 32]>,
+    
+    /// Computation offset (unique ID)
+    pub computation_offset: [u8; 8],
+    
+    /// Player pubkeys
+    pub player_pubkeys: Vec<Pubkey>,
+    
+    /// Game ID
+    pub game_id: u64,
 }
 
 /// Parameters for MPC shuffle
@@ -61,19 +89,64 @@ pub struct ShuffleParams {
 /// // Submit to program
 /// await program.methods.shuffleDeck(encryptedEntropy).rpc();
 /// ```
-pub fn mpc_shuffle_deck(params: ShuffleParams) -> Result<ShuffleResult> {
+/// Invoke Arcium MXE for deck shuffle
+/// 
+/// This function can work in two modes:
+/// 1. **Real MPC Mode**: When MXE accounts are provided, invokes actual Arcium MPC
+/// 2. **Mock Mode**: When MXE accounts are None, uses deterministic shuffle for testing
+pub fn mpc_shuffle_deck_with_mxe<'info>(
+    params: MxeShuffleParams<'info>,
+) -> Result<ShuffleResult> {
     // Validate inputs
     require!(
         params.player_pubkeys.len() >= 2,
         PokerError::NotEnoughPlayers
     );
     require!(
-        params.player_pubkeys.len() == params.player_entropy.len(),
+        params.player_pubkeys.len() == params.encrypted_entropy.len(),
         PokerError::ArciumMpcFailed
     );
     
     msg!("[ARCIUM MPC] Initiating shuffle for game {}", params.game_id);
     msg!("[ARCIUM MPC] Players participating: {}", params.player_pubkeys.len());
+    
+    // Check if MXE accounts are provided
+    if let (Some(mxe_program), Some(comp_def), Some(mempool), Some(cluster)) = 
+        (&params.mxe_program, &params.comp_def, &params.mempool, &params.cluster) {
+        
+        msg!("[ARCIUM MPC] Using REAL MPC via MXE program");
+        
+        // Create MXE instruction data
+        let ix_data = create_mxe_instruction(
+            0, // shuffle_deck instruction index
+            params.encrypted_entropy.clone(),
+            params.computation_offset,
+        )?;
+        
+        // Invoke MXE program via CPI
+        invoke_mxe_computation(
+            mxe_program,
+            &ix_data,
+            &[comp_def.clone(), mempool.clone(), cluster.clone()],
+        )?;
+        
+        msg!("[ARCIUM MPC] Shuffle queued, waiting for callback...");
+        msg!("[ARCIUM MPC] Computation ID: {:?}", params.computation_offset);
+        
+        // In production, result comes from callback
+        // For now, return placeholder
+        let session_id = generate_session_id_from_offset(params.computation_offset);
+        let commitment = generate_commitment(&params.encrypted_entropy, &session_id);
+        
+        return Ok(ShuffleResult {
+            shuffled_indices: [0; DECK_SIZE], // Will be filled by callback
+            commitment,
+            session_id,
+            shuffle_proof: None,
+        });
+    }
+    
+    msg!("[ARCIUM MPC] Using MOCK shuffle (MXE not provided)");
     
     // REAL ARCIUM MPC INTEGRATION
     // This calls the MXE program which coordinates with Arcium network nodes
@@ -90,7 +163,7 @@ pub fn mpc_shuffle_deck(params: ShuffleParams) -> Result<ShuffleResult> {
     });
     
     // Add each player's entropy as encrypted input
-    for (i, entropy) in params.player_entropy.iter().enumerate() {
+    for (i, entropy) in params.encrypted_entropy.iter().enumerate() {
         encrypted_inputs.push(EncryptedData {
             ciphertext: *entropy,
             nonce: generate_player_nonce(params.game_id, i as u8),
@@ -107,17 +180,18 @@ pub fn mpc_shuffle_deck(params: ShuffleParams) -> Result<ShuffleResult> {
     
     // Step 3: Generate session ID and commitment
     let session_id = generate_session_id(params.game_id, &params.player_pubkeys);
-    let commitment = generate_commitment(&params.player_entropy, &session_id);
+    let commitment = generate_commitment(&params.encrypted_entropy, &session_id);
     
-    // Step 4: For now, create deterministic shuffle for testing
-    // In production with deployed MXE, this would invoke the MPC network
-    let shuffled_indices = secure_shuffle_with_entropy(&params.player_entropy)?;
+    // Mock mode: Use deterministic shuffle for testing
+    let shuffled_indices = secure_shuffle_with_entropy(&params.encrypted_entropy)?;
+    let session_id = generate_session_id(params.game_id, &params.player_pubkeys);
+    let commitment = generate_commitment(&params.encrypted_entropy, &session_id);
     
-    msg!("[ARCIUM MPC] Shuffle completed. Session ID: {:?}", &session_id[..8]);
+    msg!("[ARCIUM MPC] Mock shuffle completed. Session ID: {:?}", &session_id[..8]);
     msg!("[ARCIUM MPC] Commitment: {:?}", &commitment[..8]);
     
     // Generate shuffle proof
-    let shuffle_proof = generate_shuffle_proof(&shuffled_indices, &params.player_entropy, &session_id)?;
+    let shuffle_proof = generate_shuffle_proof(&shuffled_indices, &params.encrypted_entropy, &session_id)?;
     
     Ok(ShuffleResult {
         shuffled_indices,
@@ -159,8 +233,86 @@ pub fn verify_shuffle(
     Ok(true)
 }
 
+/// Legacy function for backward compatibility
+pub fn mpc_shuffle_deck(params: ShuffleParams) -> Result<ShuffleResult> {
+    // Convert to new format without MXE accounts (mock mode)
+    let mxe_params = MxeShuffleParams {
+        mxe_program: None,
+        comp_def: None,
+        mempool: None,
+        cluster: None,
+        encrypted_entropy: params.player_entropy,
+        computation_offset: params.game_id.to_le_bytes(),
+        player_pubkeys: params.player_pubkeys,
+        game_id: params.game_id,
+    };
+    
+    mpc_shuffle_deck_with_mxe(mxe_params)
+}
+
 // ============================================================================
-// MOCK IMPLEMENTATIONS (TO BE REPLACED WITH ARCIUM SDK)
+// MXE INTEGRATION HELPERS
+// ============================================================================
+
+/// Helper: Create MXE instruction data
+fn create_mxe_instruction(
+    ix_index: u8,
+    encrypted_inputs: Vec<[u8; 32]>,
+    computation_offset: [u8; 8],
+) -> Result<Vec<u8>> {
+    // Serialize MXE instruction format
+    let mut data = Vec::new();
+    data.push(ix_index);
+    data.extend_from_slice(&computation_offset);
+    
+    for input in encrypted_inputs {
+        data.extend_from_slice(&input);
+    }
+    
+    Ok(data)
+}
+
+/// Helper: Invoke MXE via CPI
+fn invoke_mxe_computation<'a>(
+    mxe_program: &AccountInfo<'a>,
+    ix_data: &[u8],
+    accounts: &[AccountInfo<'a>],
+) -> Result<()> {
+    // Create instruction
+    let ix = anchor_lang::solana_program::instruction::Instruction {
+        program_id: *mxe_program.key,
+        accounts: accounts.iter().map(|a| {
+            anchor_lang::solana_program::instruction::AccountMeta {
+                pubkey: *a.key,
+                is_signer: a.is_signer,
+                is_writable: a.is_writable,
+            }
+        }).collect(),
+        data: ix_data.to_vec(),
+    };
+    
+    // Invoke via CPI
+    let account_infos: Vec<AccountInfo> = std::iter::once(mxe_program.clone())
+        .chain(accounts.iter().cloned())
+        .collect();
+    
+    invoke(&ix, &account_infos)?;
+    
+    Ok(())
+}
+
+fn generate_session_id_from_offset(offset: [u8; 8]) -> [u8; 32] {
+    let mut session_id = [0u8; 32];
+    session_id[..8].copy_from_slice(&offset);
+    // Fill rest with derived values
+    for i in 8..32 {
+        session_id[i] = offset[i % 8].wrapping_mul(i as u8);
+    }
+    session_id
+}
+
+// ============================================================================
+// MOCK IMPLEMENTATIONS (FOR TESTING WITHOUT MXE)
 // ============================================================================
 
 /// Secure shuffle using combined player entropy

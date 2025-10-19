@@ -1,7 +1,9 @@
 [workspace]
 members = [
-    "programs/*"
+    "programs/arcium_poker",
 ]
+# encrypted-ixs excluded due to edition2024 requirement
+# Build separately with: cd encrypted-ixs && cargo build
 resolver = "2"
 
 [profile.release]

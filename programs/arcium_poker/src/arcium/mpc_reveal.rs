@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program::invoke;
 use super::mpc_deal::EncryptedCard;
 use super::integration::{MxeInstructionData, EncryptedData};
 use crate::cards::deck::Card;
@@ -17,6 +18,36 @@ pub struct RevealParams {
     pub session_id: [u8; 32],
     
     /// Is this for showdown? (may reveal to all)
+    pub is_showdown: bool,
+}
+
+/// Parameters for invoking MXE reveal
+pub struct MxeRevealParams<'info> {
+    /// MXE program account
+    pub mxe_program: Option<AccountInfo<'info>>,
+    
+    /// Computation definition account
+    pub comp_def: Option<AccountInfo<'info>>,
+    
+    /// Mempool account
+    pub mempool: Option<AccountInfo<'info>>,
+    
+    /// Cluster account
+    pub cluster: Option<AccountInfo<'info>>,
+    
+    /// Encrypted cards to reveal
+    pub encrypted_cards: Vec<EncryptedCard>,
+    
+    /// Requester
+    pub requester: Pubkey,
+    
+    /// Session ID
+    pub session_id: [u8; 32],
+    
+    /// Computation offset
+    pub computation_offset: [u8; 8],
+    
+    /// Is showdown
     pub is_showdown: bool,
 }
 
@@ -54,70 +85,117 @@ pub struct RevealParams {
 /// 
 /// For showdown, the MXE program performs threshold decryption where
 /// multiple nodes must agree on the decrypted value.
-pub fn mpc_reveal_card(params: RevealParams) -> Result<Card> {
+/// 
+/// This function can work in two modes:
+/// 1. **Real MPC Mode**: When MXE accounts are provided
+/// 2. **Mock Mode**: When MXE accounts are None (for testing)
+pub fn mpc_reveal_card_with_mxe<'info>(
+    params: MxeRevealParams<'info>,
+) -> Result<Vec<Card>> {
     msg!(
-        "[ARCIUM MPC] Revealing card {} for {} (showdown: {})",
-        params.encrypted_card.encrypted_index,
+        "[ARCIUM MPC] Revealing {} cards for {} (showdown: {})",
+        params.encrypted_cards.len(),
         params.requester,
         params.is_showdown
     );
     
     // Verify permission
     if !params.is_showdown {
-        require!(
-            params.requester == params.encrypted_card.owner,
-            PokerError::InvalidAction
-        );
+        for card in &params.encrypted_cards {
+            require!(
+                params.requester == card.owner,
+                PokerError::InvalidAction
+            );
+        }
     }
     
-    // REAL ARCIUM MPC INTEGRATION
-    
-    let card = if params.is_showdown {
-        // Showdown: Threshold decryption (reveal to all)
-        msg!("[ARCIUM MPC] Performing threshold decryption for showdown");
+    // Check if MXE accounts are provided
+    if let (Some(mxe_program), Some(comp_def), Some(mempool), Some(cluster)) = 
+        (&params.mxe_program, &params.comp_def, &params.mempool, &params.cluster) {
         
-        let _mxe_instruction = MxeInstructionData {
-            ix_index: 2, // reveal_card_showdown instruction
-            encrypted_inputs: vec![
-                EncryptedData {
-                    ciphertext: params.encrypted_card.key_shard,
-                    nonce: generate_reveal_nonce(&params.session_id, params.encrypted_card.encrypted_index),
-                    owner: None, // Threshold decryption
-                },
-            ],
-            public_inputs: vec![params.encrypted_card.encrypted_index],
-        };
+        msg!("[ARCIUM MPC] Using REAL MPC for card reveal");
         
-        // In production, invoke MXE for threshold decryption
-        // For now, decrypt using deterministic method
-        let card = decrypt_card_deterministic(
-            params.encrypted_card.encrypted_index,
-            &params.encrypted_card.key_shard,
-            &params.session_id,
+        // Create MXE instruction data
+        let ix_data = create_reveal_instruction(
+            2, // reveal_hole_cards instruction index
+            &params.encrypted_cards,
+            params.computation_offset,
         )?;
         
-        msg!("[ARCIUM MPC] Threshold decryption complete");
-        card
-    } else {
-        // Private reveal: Only owner can decrypt
-        msg!("[ARCIUM MPC] Performing private decryption for owner");
+        // Invoke MXE program via CPI
+        invoke_mxe_computation(
+            mxe_program,
+            &ix_data,
+            &[comp_def.clone(), mempool.clone(), cluster.clone()],
+        )?;
         
-        // This uses Enc<Owner, T>.to_arcis() pattern
-        // Only the owner (with their key shard) can decrypt
-        decrypt_card_for_owner(
-            params.encrypted_card.encrypted_index,
-            &params.encrypted_card.key_shard,
-            &params.encrypted_card.owner,
-        )?
+        msg!("[ARCIUM MPC] Card reveal queued, computation ID: {:?}", params.computation_offset);
+        
+        // In production, result comes from callback
+        // For now, return placeholder
+        let mut revealed = Vec::new();
+        for card in &params.encrypted_cards {
+            let decrypted = decrypt_card_deterministic(
+                card.encrypted_index,
+                &card.key_shard,
+                &params.session_id,
+            )?;
+            revealed.push(decrypted);
+        }
+        
+        return Ok(revealed);
+    }
+    
+    msg!("[ARCIUM MPC] Using MOCK card reveal");
+    
+    // Mock mode: Decrypt cards
+    let mut revealed = Vec::new();
+    
+    for encrypted_card in &params.encrypted_cards {
+        let card = if params.is_showdown {
+            // Showdown: Threshold decryption (reveal to all)
+            decrypt_card_deterministic(
+                encrypted_card.encrypted_index,
+                &encrypted_card.key_shard,
+                &params.session_id,
+            )?
+        } else {
+            // Private reveal: Only owner can decrypt
+            decrypt_card_for_owner(
+                encrypted_card.encrypted_index,
+                &encrypted_card.key_shard,
+                &encrypted_card.owner,
+            )?
+        };
+        
+        msg!(
+            "[ARCIUM MPC] Card revealed: {:?} of {:?}",
+            card.rank,
+            card.suit
+        );
+        
+        revealed.push(card);
+    }
+    
+    Ok(revealed)
+}
+
+/// Legacy function for backward compatibility
+pub fn mpc_reveal_card(params: RevealParams) -> Result<Card> {
+    let mxe_params = MxeRevealParams {
+        mxe_program: None,
+        comp_def: None,
+        mempool: None,
+        cluster: None,
+        encrypted_cards: vec![params.encrypted_card],
+        requester: params.requester,
+        session_id: params.session_id,
+        computation_offset: [0; 8],
+        is_showdown: params.is_showdown,
     };
     
-    msg!(
-        "[ARCIUM MPC] Card revealed: {:?} of {:?}",
-        card.rank,
-        card.suit
-    );
-    
-    Ok(card)
+    let mut cards = mpc_reveal_card_with_mxe(mxe_params)?;
+    Ok(cards.remove(0))
 }
 
 /// Reveal multiple cards (e.g., for showdown)
@@ -184,7 +262,55 @@ pub fn verify_reveal(
 }
 
 // ============================================================================
-// REAL ARCIUM INTEGRATION HELPERS
+// MXE INTEGRATION HELPERS
+// ============================================================================
+
+/// Helper: Create MXE instruction data for reveal
+fn create_reveal_instruction(
+    ix_index: u8,
+    encrypted_cards: &[EncryptedCard],
+    computation_offset: [u8; 8],
+) -> Result<Vec<u8>> {
+    let mut data = Vec::new();
+    data.push(ix_index);
+    data.extend_from_slice(&computation_offset);
+    
+    // Add each card's data
+    for card in encrypted_cards {
+        data.push(card.encrypted_index);
+    }
+    
+    Ok(data)
+}
+
+/// Helper: Invoke MXE via CPI
+fn invoke_mxe_computation<'a>(
+    mxe_program: &AccountInfo<'a>,
+    ix_data: &[u8],
+    accounts: &[AccountInfo<'a>],
+) -> Result<()> {
+    let ix = anchor_lang::solana_program::instruction::Instruction {
+        program_id: *mxe_program.key,
+        accounts: accounts.iter().map(|a| {
+            anchor_lang::solana_program::instruction::AccountMeta {
+                pubkey: *a.key,
+                is_signer: a.is_signer,
+                is_writable: a.is_writable,
+            }
+        }).collect(),
+        data: ix_data.to_vec(),
+    };
+    
+    let account_infos: Vec<AccountInfo> = std::iter::once(mxe_program.clone())
+        .chain(accounts.iter().cloned())
+        .collect();
+    
+    invoke(&ix, &account_infos)?;
+    Ok(())
+}
+
+// ============================================================================
+// MOCK IMPLEMENTATIONS (FOR TESTING)
 // ============================================================================
 
 /// Decrypt card using deterministic method (for development)

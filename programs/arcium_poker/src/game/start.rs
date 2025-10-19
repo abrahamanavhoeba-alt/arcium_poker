@@ -102,7 +102,7 @@ pub fn handler(
     }
     
     // ========================================================================
-    // STEP 3: INITIALIZE GAME STATE
+    // STEP 3: INITIALIZE GAME STATE & POST BLINDS
     // ========================================================================
     
     // Set game stage to PreFlop
@@ -111,8 +111,11 @@ pub fn handler(
     // Set dealer button (starts at position 0)
     game.dealer_position = 0;
     
+    // Calculate blind positions
+    let small_blind_seat = (game.dealer_position + 1) % game.player_count;
+    let big_blind_seat = (game.dealer_position + 2) % game.player_count;
+    
     // First player after big blind acts first
-    // Small blind = dealer + 1, Big blind = dealer + 2, First actor = dealer + 3
     game.current_player_index = (game.dealer_position + 3) % game.player_count;
     
     // Set timestamp
@@ -125,11 +128,70 @@ pub fn handler(
     
     msg!("[GAME START] Game initialized!");
     msg!("[GAME START] Dealer button at seat {}", game.dealer_position);
+    msg!("[GAME START] Small blind seat: {}, Big blind seat: {}", small_blind_seat, big_blind_seat);
     msg!("[GAME START] Current player: seat {}", game.current_player_index);
     msg!("[GAME START] Stage: {:?}", game.stage);
     
-    // TODO: Post blinds automatically in next PR
-    msg!("[GAME START] Note: Blinds must be posted by players");
+    // ========================================================================
+    // STEP 4: POST BLINDS AUTOMATICALLY
+    // ========================================================================
+    msg!("[BLINDS] Posting blinds automatically...");
+    
+    // Post blinds if player accounts are provided in remaining_accounts
+    if ctx.remaining_accounts.len() >= game.player_count as usize {
+        post_blind(
+            &ctx.remaining_accounts[small_blind_seat as usize],
+            game.small_blind,
+            small_blind_seat,
+            &mut game.pot,
+        )?;
+        
+        post_blind(
+            &ctx.remaining_accounts[big_blind_seat as usize],
+            game.big_blind,
+            big_blind_seat,
+            &mut game.pot,
+        )?;
+        
+        msg!("[BLINDS] Blinds posted successfully. Pot: {}", game.pot);
+    } else {
+        msg!("[BLINDS] No player accounts - blinds enforced via current_bet");
+        msg!("[BLINDS] Players must call {} to match big blind", game.current_bet);
+    }
+    
+    Ok(())
+}
+
+/// Helper function to post a blind
+fn post_blind<'info>(
+    player_account_info: &AccountInfo<'info>,
+    blind_amount: u64,
+    seat_index: u8,
+    pot: &mut u64,
+) -> Result<()> {
+    // Borrow and deserialize player state
+    let mut data = player_account_info.try_borrow_mut_data()?;
+    let disc_bytes = &data[..8];
+    
+    // Skip discriminator and deserialize
+    let mut player_data = &data[8..];
+    let mut player_state = crate::player::state::PlayerState::try_deserialize(&mut player_data)?;
+    
+    // Verify seat
+    require!(
+        player_state.seat_index == seat_index,
+        PokerError::InvalidAction
+    );
+    
+    // Post blind
+    player_state.place_bet(blind_amount)?;
+    *pot += blind_amount;
+    
+    // Serialize back
+    let mut writer = &mut data[8..];
+    player_state.try_serialize(&mut writer)?;
+    
+    msg!("[BLINDS] Posted {} chips from seat {}", blind_amount, seat_index);
     
     Ok(())
 }
