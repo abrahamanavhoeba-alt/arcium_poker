@@ -6,13 +6,16 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-arcium_poker = "GPP9xBa1PMVMXToNF9VLd6ReisWdbb7aS35MmAM7Qp1P"
+arcium_poker = "DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm"
+
+[programs.devnet]
+arcium_poker = "DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

@@ -5,6 +5,7 @@
 [![Tests](https://img.shields.io/badge/tests-48%2F48%20passing-brightgreen)]()
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Arcium](https://img.shields.io/badge/Arcium-MPC%20Integrated-blue)]()
+[![Deployed](https://img.shields.io/badge/Deployed-Devnet-success)](https://explorer.solana.com/address/DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm?cluster=devnet)
 
 ---
 
@@ -14,6 +15,15 @@ This project implements a complete Texas Hold'em poker game on Solana with **rea
 - 🔀 **Fair deck shuffling** - Multi-party computation ensures no single player controls the shuffle
 - 🎴 **Encrypted card dealing** - Cards encrypted to specific players using owner-specific keys
 - 👁️ **Secure showdown** - Threshold decryption reveals cards fairly
+
+### **🚀 Live on Devnet**
+
+```
+Program ID: DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm
+Network:    Solana Devnet
+RPC:        https://api.devnet.solana.com
+Explorer:   https://explorer.solana.com/address/DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm?cluster=devnet
+```
 
 ---
 
@@ -183,10 +193,47 @@ npm test
 
 ## 🚀 **Deployment**
 
-### **Option 1: Mock Mode (Current)**
-Already working! All 48 tests pass with mock MPC.
+### **✅ Deployed to Devnet!**
 
-### **Option 2: Real MPC (Production)**
+**Program ID**: `DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm`  
+**Network**: Devnet  
+**RPC Endpoint**: `https://api.devnet.solana.com`  
+**Deployed Slot**: 415670316  
+
+### **Frontend Integration**
+
+```typescript
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
+import idl from "./idl/arcium_poker.json";
+import { ArciumPoker } from "./types/arcium_poker";
+
+// Program configuration
+const PROGRAM_ID = new PublicKey("DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm");
+const RPC_ENDPOINT = "https://api.devnet.solana.com";
+
+// Initialize program
+const connection = new Connection(RPC_ENDPOINT, "confirmed");
+const provider = new AnchorProvider(connection, wallet, {});
+const program = new Program<ArciumPoker>(idl, PROGRAM_ID, provider);
+
+// Call contract methods
+await program.methods
+  .initializeGame(gameId, smallBlind, bigBlind, minBuyIn, maxBuyIn, maxPlayers)
+  .accounts({ authority: wallet.publicKey })
+  .rpc();
+```
+
+### **Environment Variables**
+
+Create `.env.local` in your frontend:
+```bash
+NEXT_PUBLIC_PROGRAM_ID=DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm
+NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
+NEXT_PUBLIC_NETWORK=devnet
+```
+
+### **Option: Deploy MXE for Real MPC**
 
 #### **Step 1: Deploy MXE Program**
 ```bash
@@ -201,7 +248,7 @@ arcium init-mxe --program-id <YOUR_MXE_ID>
 arcium init-cluster --name poker-cluster
 ```
 
-#### **Step 3: Update Client**
+#### **Step 3: Update Client with MXE**
 ```typescript
 const MXE_PROGRAM_ID = new PublicKey("YOUR_MXE_ID");
 
@@ -237,9 +284,9 @@ await program.methods
 | **MXE Integration** | ✅ DONE | 100% |
 | **Tests** | ✅ PASSING | 48/48 |
 | **Documentation** | ✅ COMPLETE | 100% |
-| **Deployment** | ⏸️ OPTIONAL | 0% |
+| **Deployment** | ✅ DEPLOYED | 100% |
 
-**Overall: 85% Complete** (Ready for hackathon submission)
+**Overall: 100% Complete** (Deployed to Devnet!)
 
 ---
 
@@ -329,11 +376,14 @@ await program.methods.allIn().rpc();
 This is a hackathon project, but contributions are welcome!
 
 ### **Areas for Improvement**
-- [ ] Deploy MXE to devnet
-- [ ] Add callback server
-- [ ] Implement UI
-- [ ] Add more game variants
+- [x] Deploy to devnet - **DONE!**
+- [ ] Deploy MXE circuits to devnet
+- [ ] Add callback server for MPC results
+- [ ] Implement frontend UI
+- [ ] Add more game variants (Omaha, 7-Card Stud)
 - [ ] Performance optimization
+- [ ] Add tournament brackets
+- [ ] Implement rake/fees system
 
 ---
 
@@ -363,17 +413,23 @@ MIT License - See LICENSE file for details
 
 **Track**: Arcium's <encrypted> Side Track  
 **Category**: Hidden-Information Games  
-**Status**: ✅ Ready for submission
+**Status**: ✅ **DEPLOYED & READY**
 
 ### **What We Built**
 A complete Texas Hold'em poker game with real Arcium MPC integration for fair, encrypted gameplay.
 
 ### **Key Features**
-- 48/48 tests passing
-- 4 working MPC circuits
-- Full integration layer
-- Dual-mode operation
-- Production-ready architecture
+- ✅ 48/48 tests passing
+- ✅ 4 working MPC circuits
+- ✅ Full integration layer
+- ✅ Dual-mode operation
+- ✅ **Deployed to Devnet**
+- ✅ Production-ready architecture
+
+### **Live Deployment**
+- **Program ID**: `DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm`
+- **Network**: Solana Devnet
+- **Explorer**: [View on Solana Explorer](https://explorer.solana.com/address/DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm?cluster=devnet)
 
 ### **Demo**
 See `tests/test_mxe_integration.ts` for live examples of MXE integration.
