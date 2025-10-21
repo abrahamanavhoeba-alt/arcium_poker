@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-arcium_poker = "DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm"
+arcium_poker = "FHzVm4eu5ZuuzX3W4YRD8rS6XZVrdXubrJnYTqgBYZu2"
 
 [programs.devnet]
-arcium_poker = "DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm"
+arcium_poker = "FHzVm4eu5ZuuzX3W4YRD8rS6XZVrdXubrJnYTqgBYZu2"
 
 [registry]
 url = "https://api.apr.dev"

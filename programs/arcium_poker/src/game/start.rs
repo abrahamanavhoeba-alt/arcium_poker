@@ -41,13 +41,24 @@ pub fn handler(
         .collect();
     
     // Perform MPC shuffle with all players contributing entropy
-    let shuffle_params = ShuffleParams {
+    // Use REAL Arcium MPC with MXE accounts
+    use crate::arcium::mpc_shuffle::MxeShuffleParams;
+    
+    // Generate computation offset (unique ID for this computation)
+    let computation_offset = game.game_id.to_le_bytes();
+    
+    let mxe_shuffle_params = MxeShuffleParams {
+        mxe_program: Some(ctx.accounts.mxe_program.clone()),
+        comp_def: Some(ctx.accounts.comp_def_account.clone()),
+        mempool: Some(ctx.accounts.mempool_account.clone()),
+        cluster: Some(ctx.accounts.cluster_account.clone()),
+        encrypted_entropy: player_entropy.clone(),
+        computation_offset,
         player_pubkeys: players.clone(),
-        player_entropy: player_entropy.clone(),
         game_id: game.game_id,
     };
     
-    let shuffle_result = mpc_shuffle_deck(shuffle_params)?;
+    let shuffle_result = crate::arcium::mpc_shuffle::mpc_shuffle_deck_with_mxe(mxe_shuffle_params)?;
     
     msg!(
         "[ARCIUM MPC] Shuffle complete! Session ID: {:?}",
@@ -171,10 +182,9 @@ fn post_blind<'info>(
 ) -> Result<()> {
     // Borrow and deserialize player state
     let mut data = player_account_info.try_borrow_mut_data()?;
-    let disc_bytes = &data[..8];
     
-    // Skip discriminator and deserialize
-    let mut player_data = &data[8..];
+    // Deserialize (try_deserialize handles discriminator automatically)
+    let mut player_data = &data[..];
     let mut player_state = crate::player::state::PlayerState::try_deserialize(&mut player_data)?;
     
     // Verify seat
@@ -187,8 +197,8 @@ fn post_blind<'info>(
     player_state.place_bet(blind_amount)?;
     *pot += blind_amount;
     
-    // Serialize back
-    let mut writer = &mut data[8..];
+    // Serialize back (includes discriminator)
+    let mut writer = &mut data[..];
     player_state.try_serialize(&mut writer)?;
     
     msg!("[BLINDS] Posted {} chips from seat {}", blind_amount, seat_index);

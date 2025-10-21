@@ -15,7 +15,8 @@ pub use integration::{
     MxeCallbackData,
     EncryptedData,
     ArciumConfig,
-    invoke_mxe_computation,
-    handle_mxe_callback,
+    queue_mxe_computation,
+    handle_shuffle_callback,
+    init_computation_definition,
     verify_mxe_proof,
 };

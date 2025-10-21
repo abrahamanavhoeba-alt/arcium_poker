@@ -13,7 +13,7 @@ pub mod token;
 pub mod security;
 pub mod advanced;
 
-declare_id!("DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm");
+declare_id!("FHzVm4eu5ZuuzX3W4YRD8rS6XZVrdXubrJnYTqgBYZu2");
 
 // Re-export account state structs for use in Account Context structs below
 pub use game::state::Game;
@@ -162,6 +162,36 @@ pub mod arcium_poker {
         
         Ok(())
     }
+    
+    /// Initialize computation definition for MPC shuffle
+    /// Must be called once after deployment
+    pub fn init_shuffle_comp_def(
+        ctx: Context<InitCompDef>,
+        comp_def_offset: u32,
+    ) -> Result<()> {
+        arcium::integration::init_computation_definition(
+            &ctx.accounts.comp_def_account,
+            &ctx.accounts.mxe_account,
+            &ctx.accounts.authority,
+            &ctx.accounts.system_program,
+            comp_def_offset,
+            0, // shuffle_deck instruction index
+        )
+    }
+    
+    /// Handle MXE callback with shuffle result
+    /// Called by Arcium network after MPC computation completes
+    pub fn handle_shuffle_callback(
+        ctx: Context<MxeCallback>,
+        computation_id: [u8; 32],
+        encrypted_output: Vec<u8>,
+    ) -> Result<()> {
+        arcium::integration::handle_shuffle_callback(
+            &mut ctx.accounts.game,
+            computation_id,
+            encrypted_output,
+        )
+    }
 }
 
 // ============================================================================
@@ -194,6 +224,41 @@ pub struct StartGame<'info> {
     /// Game authority (creator) must start the game
     #[account(constraint = authority.key() == game.authority @ shared::PokerError::InvalidAction)]
     pub authority: Signer<'info>,
+    
+    /// MXE program for encrypted computations
+    /// CHECK: Arcium MXE program ID verified in handler
+    pub mxe_program: AccountInfo<'info>,
+    
+    /// MXE account for this program
+    /// CHECK: PDA derived from program ID
+    #[account(mut)]
+    pub mxe_account: AccountInfo<'info>,
+    
+    /// Computation definition account for shuffle
+    /// CHECK: PDA derived from comp def offset
+    #[account(mut)]
+    pub comp_def_account: AccountInfo<'info>,
+    
+    /// Mempool account for queueing computations
+    /// CHECK: PDA derived from program ID
+    #[account(mut)]
+    pub mempool_account: AccountInfo<'info>,
+    
+    /// Executing pool account
+    /// CHECK: PDA derived from program ID
+    #[account(mut)]
+    pub executing_pool_account: AccountInfo<'info>,
+    
+    /// Cluster account
+    /// CHECK: Verified cluster on Arcium network
+    pub cluster_account: AccountInfo<'info>,
+    
+    /// Computation account (will be created)
+    /// CHECK: PDA derived from computation offset
+    #[account(mut)]
+    pub computation_account: AccountInfo<'info>,
+    
+    pub system_program: Program<'info, System>,
     
     // Remaining accounts: PlayerState accounts for all players in order
     // These will be validated and updated during execution
@@ -304,4 +369,36 @@ pub struct ExecuteShowdown<'info> {
     pub player: Signer<'info>,
     
     // Remaining accounts: Other PlayerState accounts for all players in showdown
+}
+
+#[derive(Accounts)]
+pub struct InitCompDef<'info> {
+    /// MXE account
+    /// CHECK: PDA derived from program ID
+    #[account(mut)]
+    pub mxe_account: AccountInfo<'info>,
+    
+    /// Computation definition account to initialize
+    /// CHECK: Will be created by Arcium
+    #[account(mut)]
+    pub comp_def_account: AccountInfo<'info>,
+    
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct MxeCallback<'info> {
+    #[account(mut)]
+    pub game: Account<'info, Game>,
+    
+    /// MXE program calling back
+    /// CHECK: Verified as MXE program
+    pub mxe_program: AccountInfo<'info>,
+    
+    /// Computation account with results
+    /// CHECK: Verified via computation ID
+    pub computation_account: AccountInfo<'info>,
 }
