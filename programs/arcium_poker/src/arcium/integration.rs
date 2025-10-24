@@ -119,7 +119,7 @@ pub fn queue_mxe_computation<'info>(
         anchor_lang::solana_program::instruction::AccountMeta::new(*computation_account.key, false),
         anchor_lang::solana_program::instruction::AccountMeta::new(*mempool.key, false),
         anchor_lang::solana_program::instruction::AccountMeta::new_readonly(*cluster.key, false),
-        anchor_lang::solana_program::instruction::AccountMeta::new_readonly(*comp_def.key, false),
+        anchor_lang::solana_program::instruction::AccountMeta::new(*comp_def.key, false), // Changed to writable
         anchor_lang::solana_program::instruction::AccountMeta::new(*authority.key, true),
     ];
     
