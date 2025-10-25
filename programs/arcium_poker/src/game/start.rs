@@ -52,6 +52,8 @@ pub fn handler(
         comp_def: Some(ctx.accounts.comp_def_account.clone()),
         mempool: Some(ctx.accounts.mempool_account.clone()),
         cluster: Some(ctx.accounts.cluster_account.clone()),
+        computation_account: Some(ctx.accounts.computation_account.clone()),
+        authority: Some(ctx.accounts.authority.to_account_info()),
         encrypted_entropy: player_entropy.clone(),
         computation_offset,
         player_pubkeys: players.clone(),

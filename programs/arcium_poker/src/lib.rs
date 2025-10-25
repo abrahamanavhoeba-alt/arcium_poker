@@ -13,7 +13,7 @@ pub mod token;
 pub mod security;
 pub mod advanced;
 
-declare_id!("FHzVm4eu5ZuuzX3W4YRD8rS6XZVrdXubrJnYTqgBYZu2");
+declare_id!("Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ");
 
 // Re-export account state structs for use in Account Context structs below
 pub use game::state::Game;

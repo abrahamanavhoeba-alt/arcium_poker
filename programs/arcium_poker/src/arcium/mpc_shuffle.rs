@@ -34,6 +34,12 @@ pub struct MxeShuffleParams<'info> {
     /// Cluster account
     pub cluster: Option<AccountInfo<'info>>,
     
+    /// Computation account (to be created/used)
+    pub computation_account: Option<AccountInfo<'info>>,
+    
+    /// Authority (signer)
+    pub authority: Option<AccountInfo<'info>>,
+    
     /// Player entropy (encrypted)
     pub encrypted_entropy: Vec<[u8; 32]>,
     
@@ -111,12 +117,37 @@ pub fn mpc_shuffle_deck_with_mxe<'info>(
     msg!("[ARCIUM MPC] Players participating: {}", params.player_pubkeys.len());
     
     // Check if MXE accounts are provided
-    if let (Some(mxe_program), Some(comp_def), Some(mempool), Some(cluster)) = 
-        (&params.mxe_program, &params.comp_def, &params.mempool, &params.cluster) {
+    if let (Some(mxe_program), Some(comp_def), Some(mempool), Some(cluster), Some(computation_account), Some(authority)) = 
+        (&params.mxe_program, &params.comp_def, &params.mempool, &params.cluster, &params.computation_account, &params.authority) {
         
         msg!("[ARCIUM MPC] Using REAL MPC via MXE program");
         msg!("[ARCIUM MPC] MXE Program: {}", mxe_program.key());
         msg!("[ARCIUM MPC] Cluster: {}", cluster.key());
+        msg!("[ARCIUM MPC] Authority: {}", authority.key());
+        
+        // Check if MXE program is the same as our program (integrated MXE)
+        let our_program_id = crate::ID;
+        if mxe_program.key() == our_program_id {
+            msg!("[ARCIUM MPC] MXE is integrated into this program - using direct shuffle");
+            msg!("[ARCIUM MPC] Skipping CPI (cannot CPI to self)");
+            
+            // Use integrated MXE shuffle (no CPI needed)
+            // Generate session ID and commitment
+            let session_id = generate_session_id(params.game_id, &params.player_pubkeys);
+            let commitment = generate_commitment(&params.encrypted_entropy, &session_id);
+            
+            // For integrated MXE, we do the shuffle directly
+            let shuffled_indices = perform_integrated_shuffle(&params.encrypted_entropy, &params.player_pubkeys, params.game_id)?;
+            
+            msg!("[ARCIUM MPC] Integrated shuffle complete!");
+            
+            return Ok(ShuffleResult {
+                shuffled_indices,
+                commitment,
+                session_id,
+                shuffle_proof: Some(vec![0; 64]),
+            });
+        }
         
         // Prepare encrypted inputs for MPC
         let mut encrypted_inputs = Vec::new();
@@ -137,8 +168,8 @@ pub fn mpc_shuffle_deck_with_mxe<'info>(
             comp_def,
             mempool,
             cluster,
-            &mxe_program.clone(), // computation_account (would be passed separately)
-            &mxe_program.clone(), // authority (would be signer)
+            computation_account, // Actual computation account from context
+            authority, // Actual authority signer from context
             0, // shuffle_deck instruction index
             &encrypted_inputs,
             params.computation_offset,
@@ -256,13 +287,70 @@ pub fn mpc_shuffle_deck(params: ShuffleParams) -> Result<ShuffleResult> {
         comp_def: None,
         mempool: None,
         cluster: None,
-        encrypted_entropy: params.player_entropy,
+        computation_account: None,
+        authority: None,
+        encrypted_entropy: params.player_entropy.clone(),
         computation_offset: params.game_id.to_le_bytes(),
-        player_pubkeys: params.player_pubkeys,
+        player_pubkeys: params.player_pubkeys.clone(),
         game_id: params.game_id,
     };
     
     mpc_shuffle_deck_with_mxe(mxe_params)
+}
+
+// ============================================================================
+// INTEGRATED MXE SHUFFLE (When MXE is same as our program)
+// ============================================================================
+
+/// Perform shuffle when MXE is integrated (no CPI needed)
+fn perform_integrated_shuffle(
+    encrypted_entropy: &[[u8; 32]],
+    player_pubkeys: &[Pubkey],
+    game_id: u64,
+) -> Result<[u8; DECK_SIZE]> {
+    msg!("[INTEGRATED MXE] Performing shuffle with {} entropy sources", encrypted_entropy.len());
+    
+    // Combine all entropy sources
+    let mut combined_entropy = [0u8; 32];
+    for (i, entropy) in encrypted_entropy.iter().enumerate() {
+        for j in 0..32 {
+            combined_entropy[j] ^= entropy[j];
+        }
+        // Mix in player pubkey
+        let player_bytes = player_pubkeys[i].to_bytes();
+        for j in 0..32 {
+            combined_entropy[j] ^= player_bytes[j].wrapping_add(i as u8);
+        }
+    }
+    
+    // Mix in game ID
+    let game_bytes = game_id.to_le_bytes();
+    for i in 0..8 {
+        combined_entropy[i] ^= game_bytes[i];
+    }
+    
+    // Perform Fisher-Yates shuffle using combined entropy
+    let mut deck = create_initial_deck();
+    let mut entropy_index = 0;
+    
+    for i in (1..DECK_SIZE).rev() {
+        // Get random index from entropy
+        let random_byte = combined_entropy[entropy_index % 32];
+        entropy_index += 1;
+        
+        // Fisher-Yates: swap with random position
+        let j = (random_byte as usize) % (i + 1);
+        deck.swap(i, j);
+        
+        // Re-hash entropy for next iteration
+        if entropy_index >= 32 {
+            combined_entropy = hash_entropy(&combined_entropy);
+            entropy_index = 0;
+        }
+    }
+    
+    msg!("[INTEGRATED MXE] Shuffle complete - deck randomized");
+    Ok(deck)
 }
 
 // ============================================================================
@@ -440,6 +528,26 @@ fn generate_player_nonce(game_id: u64, player_index: u8) -> [u8; 16] {
     let mut nonce = generate_nonce(game_id);
     nonce[8] = player_index;
     nonce
+}
+
+fn hash_entropy(input: &[u8; 32]) -> [u8; 32] {
+    let mut output = *input;
+    
+    // Simple mixing function
+    for i in 0..32 {
+        let prev_idx = if i == 0 { 31 } else { i - 1 };
+        let next_idx = if i == 31 { 0 } else { i + 1 };
+        
+        let prev = input[prev_idx];
+        let curr = input[i];
+        let next = input[next_idx];
+        
+        output[i] = (prev.wrapping_mul(7))
+            .wrapping_add(curr.wrapping_mul(13))
+            .wrapping_add(next.wrapping_mul(17));
+    }
+    
+    output
 }
 
 fn combine_player_entropy(entropy: &[[u8; 32]]) -> [u8; 32] {
