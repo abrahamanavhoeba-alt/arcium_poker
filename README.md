@@ -5,7 +5,7 @@
 [![Tests](https://img.shields.io/badge/tests-48%2F48%20passing-brightgreen)]()
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Arcium](https://img.shields.io/badge/Arcium-MPC%20Integrated-blue)]()
-[![Deployed](https://img.shields.io/badge/Deployed-Devnet-success)](https://explorer.solana.com/address/DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm?cluster=devnet)
+[![Deployed](https://img.shields.io/badge/Deployed-Devnet-success)](https://explorer.solana.com/address/Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ?cluster=devnet)
 
 ---
 
@@ -19,10 +19,10 @@ This project implements a complete Texas Hold'em poker game on Solana with **rea
 ### **🚀 Live on Devnet**
 
 ```
-Program ID: DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm
+Program ID: Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ
 Network:    Solana Devnet
 RPC:        https://api.devnet.solana.com
-Explorer:   https://explorer.solana.com/address/DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm?cluster=devnet
+Explorer:   https://explorer.solana.com/address/Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ?cluster=devnet
 ```
 
 ---
@@ -195,10 +195,11 @@ npm test
 
 ### **✅ Deployed to Devnet!**
 
-**Program ID**: `DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm`  
-**Network**: Devnet  
-**RPC Endpoint**: `https://api.devnet.solana.com`  
-**Deployed Slot**: 415670316  
+**Program ID**: `Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ`
+**Network**: Devnet
+**RPC Endpoint**: `https://api.devnet.solana.com`
+**Deployed Slot**: 416979428
+**MXE Cluster**: 1078779259
 
 ### **Frontend Integration**
 
@@ -209,7 +210,7 @@ import idl from "./idl/arcium_poker.json";
 import { ArciumPoker } from "./types/arcium_poker";
 
 // Program configuration
-const PROGRAM_ID = new PublicKey("DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm");
+const PROGRAM_ID = new PublicKey("Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ");
 const RPC_ENDPOINT = "https://api.devnet.solana.com";
 
 // Initialize program
@@ -228,12 +229,41 @@ await program.methods
 
 Create `.env.local` in your frontend:
 ```bash
-NEXT_PUBLIC_PROGRAM_ID=DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm
+NEXT_PUBLIC_PROGRAM_ID=Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ
 NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
 NEXT_PUBLIC_NETWORK=devnet
 ```
 
-### **Option: Deploy MXE for Real MPC**
+### **Real MPC Integration**
+
+#### **Deploy MXE Program** ✅ **DONE!**
+```bash
+# MXE deployed to cluster 1078779259
+arcium deploy --cluster-offset 1078779259 --keypair-path ~/.config/solana/id.json -u d
+```
+
+#### **Use Real MPC in Frontend**
+```typescript
+// See HOW_TO_USE_REAL_MPC.md for complete integration guide
+import { getMxeAccount, getCompDefAccount, getClusterAccount } from "./utils/arcium";
+
+// Get MXE accounts for real MPC
+const mxeAccount = getMxeAccount(PROGRAM_ID);
+const compDefAccount = getCompDefAccount(PROGRAM_ID, 1);
+const clusterAccount = getClusterAccount(PROGRAM_ID, 1078779259);
+
+// Start game with REAL encrypted MPC!
+await program.methods
+  .startGame(entropy)
+  .accounts({
+    game,
+    authority: wallet.publicKey,
+    mxeProgram: PROGRAM_ID,
+    compDef: compDefAccount,
+    cluster: clusterAccount,
+  })
+  .rpc();
+```
 
 #### **Step 1: Deploy MXE Program**
 ```bash
@@ -304,16 +334,12 @@ await program.methods
 - ✅ Production-ready error handling
 - ✅ Detailed documentation
 
-### **Real MPC Integration**
-- ✅ 4 working Arcis circuits
-- ✅ Full integration layer
-- ✅ CPI implementation
-- ✅ Callback architecture
-
 ---
 
 ## 📚 **Documentation**
 
+- **[MXE_DEPLOYMENT_INFO.md](./MXE_DEPLOYMENT_INFO.md)** - Complete deployment details and MPC configuration
+- **[HOW_TO_USE_REAL_MPC.md](./HOW_TO_USE_REAL_MPC.md)** - Frontend integration guide for real MPC
 - **[PHASE_3_COMPLETE.md](./PHASE_3_COMPLETE.md)** - Full integration guide
 - **[IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)** - Feature checklist
 - **[FULL_MPC_INTEGRATION_ROADMAP.md](./FULL_MPC_INTEGRATION_ROADMAP.md)** - Development roadmap
@@ -321,7 +347,7 @@ await program.methods
 
 ---
 
-## 🎮 **How to Play**
+## **How to Play**
 
 ### **1. Initialize Game**
 ```typescript
@@ -334,6 +360,7 @@ await program.methods
     maxBuyIn,
     maxPlayers
   )
+  .accounts({ authority: wallet.publicKey })
   .rpc();
 ```
 
@@ -345,13 +372,28 @@ await program.methods
   .rpc();
 ```
 
-### **3. Start Game**
+### **3. Start Game (with Real MPC!)**
 ```typescript
 const playerEntropy = generateEntropy(); // Client-side
+
+// Use mock mode (default)
 await program.methods
   .startGame(playerEntropy)
   .accounts({ game, authority })
   .rpc();
+
+// Or use REAL MPC (see HOW_TO_USE_REAL_MPC.md)
+const PROGRAM_ID = new PublicKey("Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ");
+const mxeAccounts = {
+  mxeProgram: PROGRAM_ID,
+  compDef: getCompDefAccount(PROGRAM_ID, 1),
+  cluster: getClusterAccount(PROGRAM_ID, 1078779259),
+};
+
+await program.methods
+  .startGame(playerEntropy)
+  .accounts({ game, authority, ...mxeAccounts })
+  .rpc(); // 🔐 Real encrypted MPC shuffle!
 ```
 
 ### **4. Play**
@@ -377,8 +419,8 @@ This is a hackathon project, but contributions are welcome!
 
 ### **Areas for Improvement**
 - [x] Deploy to devnet - **DONE!**
-- [ ] Deploy MXE circuits to devnet
-- [ ] Add callback server for MPC results
+- [x] Deploy MXE circuits to devnet - **DONE!** (Cluster 1078779259)
+- [ ] Add callback server for MPC results (optional - current architecture works)
 - [ ] Implement frontend UI
 - [ ] Add more game variants (Omaha, 7-Card Stud)
 - [ ] Performance optimization
@@ -411,8 +453,8 @@ MIT License - See LICENSE file for details
 
 ## 🎯 **Hackathon Submission**
 
-**Track**: Arcium's <encrypted> Side Track  
-**Category**: Hidden-Information Games  
+**Track**: Arcium's <encrypted> Side Track
+**Category**: Hidden-Information Games
 **Status**: ✅ **DEPLOYED & READY**
 
 ### **What We Built**
@@ -420,19 +462,20 @@ A complete Texas Hold'em poker game with real Arcium MPC integration for fair, e
 
 ### **Key Features**
 - ✅ 48/48 tests passing
-- ✅ 4 working MPC circuits
-- ✅ Full integration layer
-- ✅ Dual-mode operation
-- ✅ **Deployed to Devnet**
+- ✅ 4 working MPC circuits deployed
+- ✅ Full integration layer with CPI calls
+- ✅ Dual-mode operation (mock + real MPC)
+- ✅ **Deployed to Devnet** (both Solana program & MXE)
 - ✅ Production-ready architecture
 
 ### **Live Deployment**
-- **Program ID**: `DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm`
+- **Program ID**: `Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ`
+- **MXE Cluster**: `1078779259`
 - **Network**: Solana Devnet
-- **Explorer**: [View on Solana Explorer](https://explorer.solana.com/address/DmthLucwUx2iM7VoFUv14PHfVqfqGxHKLMVXzUb8vvMm?cluster=devnet)
+- **Explorer**: [View on Solana Explorer](https://explorer.solana.com/address/Cm5y2aab75vj9dpRcyG1EeZNgeh4GZLRkN3BmmRVNEwZ?cluster=devnet)
 
 ### **Demo**
-See `tests/test_mxe_integration.ts` for live examples of MXE integration.
+See `tests/test_mxe_integration.ts` for live examples of MXE integration, and `HOW_TO_USE_REAL_MPC.md` for complete frontend integration guide.
 
 ---
 
